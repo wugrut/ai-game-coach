@@ -148,6 +148,166 @@ class GeminiAnalyzer:
             self._last_call_time = time.time()  # Still count for rate limiting
             return None
 
+    def analyze_frame_with_audio(
+        self,
+        jpeg_bytes: bytes,
+        audio_bytes: Optional[bytes],
+        system_prompt: str,
+        user_prompt: str,
+    ) -> Optional[AnalysisResult]:
+        """
+        Analyze a game frame WITH audio using Gemini multimodal API.
+
+        Sends both the screenshot and recent game audio for richer analysis.
+        Falls back to vision-only if audio_bytes is None.
+
+        Args:
+            jpeg_bytes: The captured frame as JPEG bytes.
+            audio_bytes: Recent game audio as WAV bytes, or None.
+            system_prompt: The system instruction for the AI coach.
+            user_prompt: The user-facing prompt for this analysis request.
+
+        Returns:
+            AnalysisResult or None if the call fails.
+        """
+        # If no audio, fall back to vision-only analysis
+        if audio_bytes is None:
+            return self.analyze_frame(jpeg_bytes, system_prompt, user_prompt)
+
+        if not self.is_initialized:
+            if not self.initialize():
+                return None
+
+        # Rate limiting
+        min_interval = config.get("analysis_interval", 3.0)
+        elapsed = time.time() - self._last_call_time
+        if elapsed < min_interval:
+            wait = min_interval - elapsed
+            logger.debug(f"Rate limiting: waiting {wait:.1f}s")
+            time.sleep(wait)
+
+        try:
+            # Build multimodal content parts — image + audio
+            image_part = types.Part.from_bytes(
+                data=jpeg_bytes,
+                mime_type="image/jpeg",
+            )
+            audio_part = types.Part.from_bytes(
+                data=audio_bytes,
+                mime_type="audio/wav",
+            )
+
+            # Build conversation with history + multimodal current frame
+            contents = self._build_contents_multimodal(
+                image_part, audio_part, user_prompt,
+            )
+
+            # Call Gemini
+            response = self._client.models.generate_content(
+                model=config.get("gemini_model", "gemini-2.5-flash"),
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.7,
+                    max_output_tokens=1024,
+                ),
+            )
+
+            self._last_call_time = time.time()
+            self._total_calls += 1
+
+            text = response.text if response.text else ""
+            if not text:
+                logger.warning("Empty response from Gemini (multimodal)")
+                return None
+
+            result = AnalysisResult(
+                text=text,
+                timestamp=time.time(),
+                mode=config.get("coaching_mode", "strategy"),
+            )
+            self._add_to_history(user_prompt, text)
+            return result
+
+        except Exception as e:
+            logger.error(f"Gemini multimodal analysis failed: {e}")
+            self._last_call_time = time.time()
+            return None
+
+    def send_chat_message(
+        self,
+        message: str,
+        system_prompt: str,
+        jpeg_bytes: Optional[bytes] = None,
+        chat_history: Optional[List[Dict]] = None,
+    ) -> Optional[str]:
+        """
+        Send an interactive chat message to Gemini.
+
+        Used by the Chat Companion feature. Optionally includes the current
+        screenshot for context-aware responses.
+
+        Args:
+            message: The user's chat message.
+            system_prompt: System prompt for the chat persona.
+            jpeg_bytes: Optional current screenshot for context.
+            chat_history: Optional separate chat history.
+
+        Returns:
+            AI response text or None on failure.
+        """
+        if not self.is_initialized:
+            if not self.initialize():
+                return None
+
+        try:
+            contents = []
+
+            # Add chat history
+            if chat_history:
+                for entry in chat_history[-10:]:
+                    contents.append(
+                        types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(text=entry["user"])],
+                        )
+                    )
+                    contents.append(
+                        types.Content(
+                            role="model",
+                            parts=[types.Part.from_text(text=entry["model"])],
+                        )
+                    )
+
+            # Build current message parts
+            parts = []
+            if jpeg_bytes:
+                parts.append(types.Part.from_bytes(
+                    data=jpeg_bytes,
+                    mime_type="image/jpeg",
+                ))
+            parts.append(types.Part.from_text(text=message))
+
+            contents.append(
+                types.Content(role="user", parts=parts)
+            )
+
+            response = self._client.models.generate_content(
+                model=config.get("gemini_model", "gemini-2.5-flash"),
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.8,
+                    max_output_tokens=2048,
+                ),
+            )
+
+            return response.text if response.text else None
+
+        except Exception as e:
+            logger.error(f"Chat message failed: {e}")
+            return None
+
     def test_connection(self) -> tuple[bool, str]:
         """Test the Gemini API connection with a simple prompt."""
         if not self.is_initialized:
@@ -194,6 +354,48 @@ class GeminiAnalyzer:
             types.Content(
                 role="user",
                 parts=[image_part, types.Part.from_text(text=user_prompt)],
+            )
+        )
+
+        return contents
+
+    def _build_contents_multimodal(
+        self,
+        image_part: types.Part,
+        audio_part: types.Part,
+        user_prompt: str,
+    ) -> list:
+        """Build content list with image + audio + conversation history."""
+        contents = []
+
+        # Add recent history for context (sliding window)
+        max_history = config.get("max_context_messages", 10)
+        with self._lock:
+            recent = self._history[-max_history:]
+
+        for entry in recent:
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=f"[Previous observation] {entry['user']}")],
+                )
+            )
+            contents.append(
+                types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=entry["model"])],
+                )
+            )
+
+        # Add current frame + audio + prompt
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    image_part,
+                    audio_part,
+                    types.Part.from_text(text=user_prompt),
+                ],
             )
         )
 

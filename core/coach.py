@@ -1,6 +1,7 @@
 """
 Game coaching orchestrator for AI Game Coach.
 Manages coaching modes, prompt construction, and coordinates capture → analysis → display.
+v2: Integrates audio capture, voice commentary, and overlay messaging.
 """
 
 import logging
@@ -11,6 +12,7 @@ from typing import Optional, Callable, List
 
 from core.config import config
 from core.capture import ScreenCapture
+from core.audio_capture import AudioCapture
 from core.analyzer import GeminiAnalyzer, AnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -61,10 +63,14 @@ class GameCoach:
       1. Real-time Callouts — Quick, actionable observations
       2. Strategy Advisor — Deeper strategic analysis
       3. Post-Play Review — Comprehensive post-game review
+
+    v2: Also captures system audio and sends it alongside screenshots for
+    multimodal analysis. Integrates with voice commentary and overlay.
     """
 
     def __init__(self):
         self.capture = ScreenCapture()
+        self.audio = AudioCapture()
         self.analyzer = GeminiAnalyzer()
 
         self._coaching_active = False
@@ -72,10 +78,14 @@ class GameCoach:
         self._messages: List[CoachMessage] = []
         self._messages_lock = threading.Lock()
 
+        # Voice engine (lazy-loaded to avoid import issues if pyttsx3 is missing)
+        self._voice = None
+
         # Callbacks
         self._on_message: Optional[Callable[[CoachMessage], None]] = None
         self._on_status_change: Optional[Callable[[str], None]] = None
         self._on_frame_captured: Optional[Callable] = None
+        self._on_overlay_message: Optional[Callable[[str, str], None]] = None
 
     # ── Properties ───────────────────────────────────────────────────────
 
@@ -87,6 +97,17 @@ class GameCoach:
     def messages(self) -> List[CoachMessage]:
         with self._messages_lock:
             return list(self._messages)
+
+    @property
+    def voice(self):
+        """Lazy-load the voice engine."""
+        if self._voice is None:
+            try:
+                from core.voice import VoiceEngine
+                self._voice = VoiceEngine()
+            except Exception as e:
+                logger.warning(f"Voice engine not available: {e}")
+        return self._voice
 
     # ── Callback Registration ────────────────────────────────────────────
 
@@ -101,6 +122,10 @@ class GameCoach:
     def on_frame_captured(self, callback: Callable):
         """Register a callback for when a new frame is captured."""
         self._on_frame_captured = callback
+
+    def on_overlay_message(self, callback: Callable[[str, str], None]):
+        """Register a callback for overlay messages (text, priority)."""
+        self._on_overlay_message = callback
 
     # ── Coaching Control ─────────────────────────────────────────────────
 
@@ -124,8 +149,22 @@ class GameCoach:
         self.capture.region = region
         self.capture.target_fps = config.get("capture_fps", 2)
 
-        # Start capture
+        # Start screen capture
         self.capture.start()
+
+        # Start audio capture if enabled
+        if config.get("audio_enabled", True):
+            self.audio.buffer_duration = config.get("audio_buffer_duration", 5.0)
+            self.audio.start()
+            if self.audio.is_running:
+                logger.info(f"Audio capture active: device='{self.audio.device_name}'")
+            else:
+                logger.warning("Audio capture failed to start — continuing without audio")
+
+        # Start voice engine if enabled
+        if config.get("voice_enabled", False) and self.voice:
+            self.voice.start()
+            logger.info("Voice commentary enabled")
 
         # Start coaching loop
         self._coaching_active = True
@@ -134,9 +173,13 @@ class GameCoach:
 
         mode = config.get("coaching_mode", "strategy")
         game = config.get("game_name", "General")
-        self._emit_status(f"🎮 Coaching active — {game} ({mode} mode)")
+        audio_status = "🎤" if self.audio.is_running else ""
+        voice_status = "🔊" if (self.voice and self.voice.is_running) else ""
+        self._emit_status(f"🎮 Coaching active — {game} ({mode}) {audio_status}{voice_status}")
         self._emit_message(CoachMessage(
-            f"Coaching started for **{game}**! I'm watching your screen and will provide {mode} advice.",
+            f"Coaching started for **{game}**! I'm watching your screen"
+            + (" and listening to game audio" if self.audio.is_running else "")
+            + f". Mode: {mode}.",
             priority=CoachMessage.PRIORITY_INFO,
             mode=mode,
         ))
@@ -145,6 +188,12 @@ class GameCoach:
         """Stop the coaching pipeline."""
         self._coaching_active = False
         self.capture.stop()
+        self.audio.stop()
+
+        # Stop voice engine
+        if self._voice and self._voice.is_running:
+            self._voice.stop()
+
         if self._coaching_thread:
             self._coaching_thread.join(timeout=5.0)
             self._coaching_thread = None
@@ -179,17 +228,30 @@ class GameCoach:
                     except Exception:
                         pass
 
+                # Get audio if available
+                audio_bytes = None
+                if self.audio.is_running and config.get("audio_enabled", True):
+                    audio_bytes = self.audio.get_latest_audio_bytes(duration=3.0)
+
                 # Build prompts
                 system_prompt = self._build_system_prompt()
                 user_prompt = self._build_user_prompt()
 
-                # Send to Gemini for analysis
+                # Send to Gemini for analysis (multimodal if audio available)
                 self._emit_status("🧠 Analyzing...")
-                result = self.analyzer.analyze_frame(
-                    jpeg_bytes=jpeg_bytes,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                )
+                if audio_bytes:
+                    result = self.analyzer.analyze_frame_with_audio(
+                        jpeg_bytes=jpeg_bytes,
+                        audio_bytes=audio_bytes,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                    )
+                else:
+                    result = self.analyzer.analyze_frame(
+                        jpeg_bytes=jpeg_bytes,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                    )
 
                 if result and result.text:
                     # Parse the response into coaching messages
@@ -197,9 +259,27 @@ class GameCoach:
                     for msg in messages:
                         self._emit_message(msg)
 
+                        # Send to overlay
+                        if self._on_overlay_message:
+                            try:
+                                self._on_overlay_message(msg.text, msg.priority)
+                            except Exception:
+                                pass
+
+                        # Speak via voice engine (critical messages get priority)
+                        if self._voice and self._voice.is_running:
+                            try:
+                                self._voice.speak(
+                                    msg.text,
+                                    priority=(msg.priority == CoachMessage.PRIORITY_CRITICAL),
+                                )
+                            except Exception:
+                                pass
+
                     calls = self.analyzer.total_calls
                     fps = self.capture.actual_fps
-                    self._emit_status(f"🎮 Coaching active — {fps:.0f} FPS | {calls} analyses")
+                    audio_lvl = f" | 🎤 {self.audio.get_audio_level():.0%}" if self.audio.is_running else ""
+                    self._emit_status(f"🎮 Coaching — {fps:.0f} FPS | {calls} analyses{audio_lvl}")
 
             except Exception as e:
                 logger.error(f"Coaching loop error: {e}")
@@ -235,6 +315,20 @@ class GameCoach:
         if mode_prompt:
             parts.append(f"\n\n## Mode-Specific Instructions\n{mode_prompt}")
 
+        # v2: Audio awareness
+        if self.audio.is_running:
+            parts.append(
+                "\n\n## Audio Context\n"
+                "You are also receiving the game's audio alongside the screenshot. "
+                "Incorporate audio cues into your analysis:\n"
+                "- Gunshots, explosions, or combat sounds indicate nearby action\n"
+                "- Character dialogue or voice lines may reveal story context or objectives\n"
+                "- Music changes often signal phase transitions (boss fights, danger, victory)\n"
+                "- UI sounds (pings, alerts, notification tones) indicate in-game events\n"
+                "- Silence after noise may indicate the player is safe or between encounters\n"
+                "If the audio is unclear or contains no useful information, focus on the visual."
+            )
+
         if custom:
             parts.append(f"\n\n## User's Custom Focus\n{custom}")
 
@@ -243,24 +337,25 @@ class GameCoach:
     def _build_user_prompt(self) -> str:
         """Build the user prompt for the current frame analysis."""
         mode = config.get("coaching_mode", "strategy")
+        audio_hint = " and game audio" if self.audio.is_running else ""
 
         if mode == "realtime":
             return (
-                "Analyze this game screenshot. Provide quick, actionable callouts about "
+                f"Analyze this game screenshot{audio_hint}. Provide quick, actionable callouts about "
                 "what you see — enemy positions, items, dangers, or opportunities. "
                 "Keep it brief and urgent. Use priority markers: "
                 "[CRITICAL] for immediate threats, [IMPORTANT] for key observations, [TIP] for suggestions."
             )
         elif mode == "post_analysis":
             return (
-                "Review this game screenshot as part of a post-play analysis. "
+                f"Review this game screenshot{audio_hint} as part of a post-play analysis. "
                 "Analyze the player's positioning, resource management, and decision-making. "
                 "Provide constructive feedback with specific improvement suggestions. "
                 "Use priority markers: [CRITICAL], [IMPORTANT], [TIP] for categorization."
             )
         else:  # strategy
             return (
-                "Analyze this game screenshot and provide strategic coaching advice. "
+                f"Analyze this game screenshot{audio_hint} and provide strategic coaching advice. "
                 "Consider the current game state, player positioning, available resources, "
                 "and suggest the best course of action. Explain your reasoning briefly. "
                 "Use priority markers: [CRITICAL], [IMPORTANT], [TIP] for categorization."

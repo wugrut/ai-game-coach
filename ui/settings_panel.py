@@ -1,6 +1,8 @@
 """
 Settings panel for AI Game Coach.
-Configuration UI for API key, game settings, coaching mode, and capture options.
+Configuration UI for API key, game settings, coaching mode, capture, audio,
+voice, overlay, and plugin options.
+v2: Adds audio, voice, overlay, and plugin settings sections.
 """
 
 import customtkinter as ctk
@@ -33,6 +35,9 @@ class SettingsPanel(ctk.CTkFrame):
         self._build_game_section()
         self._build_coaching_section()
         self._build_capture_section()
+        self._build_audio_section()
+        self._build_voice_section()
+        self._build_overlay_section()
         self._build_advanced_section()
 
         # Load current values
@@ -244,6 +249,189 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._interval_slider.pack(fill=ctk.X, pady=(4, 0))
 
+    # ── Audio Section (v2) ───────────────────────────────────────────────
+
+    def _build_audio_section(self):
+        card = create_card_frame(self._scroll)
+        card.pack(fill=ctk.X, pady=(0, 8))
+
+        create_label(card, "🎤 Audio Capture", style="heading").pack(
+            anchor="w", padx=16, pady=(16, 8),
+        )
+
+        create_label(
+            card, "Captures system audio (what you hear) via WASAPI loopback",
+            style="small", text_color=Colors.TEXT_DISABLED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        # Enable toggle
+        toggle_frame = ctk.CTkFrame(card, fg_color="transparent")
+        toggle_frame.pack(fill=ctk.X, padx=16, pady=(0, 8))
+
+        self._audio_enabled_var = ctk.BooleanVar(value=True)
+        self._audio_toggle = ctk.CTkSwitch(
+            toggle_frame, text="Enable Audio Capture",
+            variable=self._audio_enabled_var,
+            fg_color=Colors.BG_INPUT, progress_color=Colors.ACCENT_GREEN,
+            button_color=Colors.ACCENT_BLUE,
+            text_color=Colors.TEXT_PRIMARY, font=Fonts.body(),
+        )
+        self._audio_toggle.pack(anchor="w")
+
+        # Buffer duration slider
+        buf_frame = ctk.CTkFrame(card, fg_color="transparent")
+        buf_frame.pack(fill=ctk.X, padx=16, pady=(0, 16))
+
+        buf_header = ctk.CTkFrame(buf_frame, fg_color="transparent")
+        buf_header.pack(fill=ctk.X)
+
+        create_label(buf_header, "Audio Buffer (seconds)", style="small",
+                     text_color=Colors.TEXT_SECONDARY).pack(side=ctk.LEFT)
+
+        self._audio_buf_label = create_label(buf_header, "5.0s", style="small",
+                                              text_color=Colors.ACCENT_BLUE)
+        self._audio_buf_label.pack(side=ctk.RIGHT)
+
+        self._audio_buf_slider = ctk.CTkSlider(
+            buf_frame, from_=1, to=15, number_of_steps=14,
+            fg_color=Colors.BG_INPUT, progress_color=Colors.ACCENT_BLUE,
+            button_color=Colors.ACCENT_BLUE, button_hover_color=Colors.ACCENT_GREEN,
+            command=self._on_audio_buf_change,
+        )
+        self._audio_buf_slider.pack(fill=ctk.X, pady=(4, 0))
+
+    # ── Voice Section (v2) ───────────────────────────────────────────────
+
+    def _build_voice_section(self):
+        card = create_card_frame(self._scroll)
+        card.pack(fill=ctk.X, pady=(0, 8))
+
+        create_label(card, "🔊 Voice Commentary", style="heading").pack(
+            anchor="w", padx=16, pady=(16, 8),
+        )
+
+        create_label(
+            card, "AI reads coaching advice aloud using text-to-speech",
+            style="small", text_color=Colors.TEXT_DISABLED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        # Enable toggle
+        toggle_frame = ctk.CTkFrame(card, fg_color="transparent")
+        toggle_frame.pack(fill=ctk.X, padx=16, pady=(0, 8))
+
+        self._voice_enabled_var = ctk.BooleanVar(value=False)
+        self._voice_toggle = ctk.CTkSwitch(
+            toggle_frame, text="Enable Voice Commentary",
+            variable=self._voice_enabled_var,
+            fg_color=Colors.BG_INPUT, progress_color=Colors.ACCENT_GREEN,
+            button_color=Colors.ACCENT_BLUE,
+            text_color=Colors.TEXT_PRIMARY, font=Fonts.body(),
+        )
+        self._voice_toggle.pack(anchor="w")
+
+        # Speed slider
+        speed_frame = ctk.CTkFrame(card, fg_color="transparent")
+        speed_frame.pack(fill=ctk.X, padx=16, pady=(0, 8))
+
+        speed_header = ctk.CTkFrame(speed_frame, fg_color="transparent")
+        speed_header.pack(fill=ctk.X)
+
+        create_label(speed_header, "Speech Speed", style="small",
+                     text_color=Colors.TEXT_SECONDARY).pack(side=ctk.LEFT)
+
+        self._voice_speed_label = create_label(speed_header, "1.2x", style="small",
+                                                text_color=Colors.ACCENT_BLUE)
+        self._voice_speed_label.pack(side=ctk.RIGHT)
+
+        self._voice_speed_slider = ctk.CTkSlider(
+            speed_frame, from_=0.5, to=3.0, number_of_steps=25,
+            fg_color=Colors.BG_INPUT, progress_color=Colors.ACCENT_BLUE,
+            button_color=Colors.ACCENT_BLUE, button_hover_color=Colors.ACCENT_GREEN,
+            command=self._on_voice_speed_change,
+        )
+        self._voice_speed_slider.pack(fill=ctk.X, pady=(4, 0))
+
+        # Volume slider
+        vol_frame = ctk.CTkFrame(card, fg_color="transparent")
+        vol_frame.pack(fill=ctk.X, padx=16, pady=(0, 16))
+
+        vol_header = ctk.CTkFrame(vol_frame, fg_color="transparent")
+        vol_header.pack(fill=ctk.X)
+
+        create_label(vol_header, "Voice Volume", style="small",
+                     text_color=Colors.TEXT_SECONDARY).pack(side=ctk.LEFT)
+
+        self._voice_vol_label = create_label(vol_header, "80%", style="small",
+                                              text_color=Colors.ACCENT_BLUE)
+        self._voice_vol_label.pack(side=ctk.RIGHT)
+
+        self._voice_vol_slider = ctk.CTkSlider(
+            vol_frame, from_=0, to=1.0, number_of_steps=20,
+            fg_color=Colors.BG_INPUT, progress_color=Colors.ACCENT_BLUE,
+            button_color=Colors.ACCENT_BLUE, button_hover_color=Colors.ACCENT_GREEN,
+            command=self._on_voice_vol_change,
+        )
+        self._voice_vol_slider.pack(fill=ctk.X, pady=(4, 0))
+
+    # ── Overlay Section (v2) ─────────────────────────────────────────────
+
+    def _build_overlay_section(self):
+        card = create_card_frame(self._scroll)
+        card.pack(fill=ctk.X, pady=(0, 8))
+
+        create_label(card, "🖥️ Overlay HUD", style="heading").pack(
+            anchor="w", padx=16, pady=(16, 8),
+        )
+
+        create_label(
+            card, "Shows coaching tips directly over your game (click-through)",
+            style="small", text_color=Colors.TEXT_DISABLED,
+        ).pack(anchor="w", padx=16, pady=(0, 8))
+
+        # Position
+        pos_frame = ctk.CTkFrame(card, fg_color="transparent")
+        pos_frame.pack(fill=ctk.X, padx=16, pady=(0, 8))
+
+        create_label(pos_frame, "Overlay Position", style="small",
+                     text_color=Colors.TEXT_SECONDARY).pack(anchor="w")
+
+        self._overlay_pos_var = ctk.StringVar(value="bottom")
+        self._overlay_pos_menu = ctk.CTkOptionMenu(
+            pos_frame,
+            values=["top", "bottom", "top_right", "bottom_right"],
+            variable=self._overlay_pos_var,
+            fg_color=Colors.BG_INPUT, button_color=Colors.BG_LIGHT,
+            button_hover_color=Colors.BG_HOVER,
+            text_color=Colors.TEXT_PRIMARY, font=Fonts.body(),
+            dropdown_fg_color=Colors.BG_MEDIUM,
+            dropdown_text_color=Colors.TEXT_PRIMARY,
+            dropdown_hover_color=Colors.BG_HOVER,
+            height=36, corner_radius=8,
+        )
+        self._overlay_pos_menu.pack(fill=ctk.X, pady=(4, 0))
+
+        # Opacity slider
+        opacity_frame = ctk.CTkFrame(card, fg_color="transparent")
+        opacity_frame.pack(fill=ctk.X, padx=16, pady=(0, 16))
+
+        opacity_header = ctk.CTkFrame(opacity_frame, fg_color="transparent")
+        opacity_header.pack(fill=ctk.X)
+
+        create_label(opacity_header, "Overlay Opacity", style="small",
+                     text_color=Colors.TEXT_SECONDARY).pack(side=ctk.LEFT)
+
+        self._overlay_opacity_label = create_label(opacity_header, "85%", style="small",
+                                                    text_color=Colors.ACCENT_BLUE)
+        self._overlay_opacity_label.pack(side=ctk.RIGHT)
+
+        self._overlay_opacity_slider = ctk.CTkSlider(
+            opacity_frame, from_=0.3, to=1.0, number_of_steps=14,
+            fg_color=Colors.BG_INPUT, progress_color=Colors.ACCENT_BLUE,
+            button_color=Colors.ACCENT_BLUE, button_hover_color=Colors.ACCENT_GREEN,
+            command=self._on_overlay_opacity_change,
+        )
+        self._overlay_opacity_slider.pack(fill=ctk.X, pady=(4, 0))
+
     # ── Advanced Section ─────────────────────────────────────────────────
 
     def _build_advanced_section(self):
@@ -346,6 +534,27 @@ class SettingsPanel(ctk.CTkFrame):
         self._interval_slider.set(interval)
         self._interval_value_label.configure(text=f"{interval:.0f}s")
 
+        # Audio settings (v2)
+        self._audio_enabled_var.set(config.get("audio_enabled", True))
+        audio_buf = config.get("audio_buffer_duration", 5.0)
+        self._audio_buf_slider.set(audio_buf)
+        self._audio_buf_label.configure(text=f"{audio_buf:.0f}s")
+
+        # Voice settings (v2)
+        self._voice_enabled_var.set(config.get("voice_enabled", False))
+        voice_speed = config.get("voice_speed", 1.2)
+        self._voice_speed_slider.set(voice_speed)
+        self._voice_speed_label.configure(text=f"{voice_speed:.1f}x")
+        voice_vol = config.get("voice_volume", 0.8)
+        self._voice_vol_slider.set(voice_vol)
+        self._voice_vol_label.configure(text=f"{int(voice_vol * 100)}%")
+
+        # Overlay settings (v2)
+        self._overlay_pos_var.set(config.get("overlay_position", "bottom"))
+        opacity = config.get("overlay_opacity", 0.85)
+        self._overlay_opacity_slider.set(opacity)
+        self._overlay_opacity_label.configure(text=f"{int(opacity * 100)}%")
+
         # Advanced
         model = config.get("gemini_model", "gemini-2.5-flash")
         self._model_var.set(model)
@@ -361,7 +570,7 @@ class SettingsPanel(ctk.CTkFrame):
         if api_key:
             config.api_key = api_key
 
-        # Game settings
+        # All settings
         config.update({
             "game_name": self._game_name_entry.get().strip() or "General",
             "game_genre": self._genre_var.get(),
@@ -369,6 +578,17 @@ class SettingsPanel(ctk.CTkFrame):
             "custom_instructions": self._custom_instr.get("1.0", "end-1c").strip(),
             "capture_fps": int(self._fps_slider.get()),
             "analysis_interval": float(self._interval_slider.get()),
+            # v2: Audio
+            "audio_enabled": self._audio_enabled_var.get(),
+            "audio_buffer_duration": float(self._audio_buf_slider.get()),
+            # v2: Voice
+            "voice_enabled": self._voice_enabled_var.get(),
+            "voice_speed": float(self._voice_speed_slider.get()),
+            "voice_volume": float(self._voice_vol_slider.get()),
+            # v2: Overlay
+            "overlay_position": self._overlay_pos_var.get(),
+            "overlay_opacity": float(self._overlay_opacity_slider.get()),
+            # Advanced
             "gemini_model": self._model_var.get(),
             "max_context_messages": int(self._ctx_slider.get()),
         })
@@ -443,3 +663,15 @@ class SettingsPanel(ctk.CTkFrame):
 
     def _on_ctx_change(self, value):
         self._ctx_value_label.configure(text=str(int(value)))
+
+    def _on_audio_buf_change(self, value):
+        self._audio_buf_label.configure(text=f"{value:.0f}s")
+
+    def _on_voice_speed_change(self, value):
+        self._voice_speed_label.configure(text=f"{value:.1f}x")
+
+    def _on_voice_vol_change(self, value):
+        self._voice_vol_label.configure(text=f"{int(value * 100)}%")
+
+    def _on_overlay_opacity_change(self, value):
+        self._overlay_opacity_label.configure(text=f"{int(value * 100)}%")

@@ -1,6 +1,7 @@
 """
 Main application window for AI Game Coach.
 Brings together all UI components with sidebar navigation.
+v2: Adds chat companion, voice controls, overlay toggle, and audio status.
 """
 
 import customtkinter as ctk
@@ -8,6 +9,7 @@ from typing import Optional
 
 from core.config import config
 from core.coach import GameCoach, CoachMessage
+from core.chat import ChatEngine, ChatMessage
 from ui.theme import (
     Colors, Fonts, apply_theme,
     create_card_frame, create_label, create_accent_button, create_outline_button,
@@ -15,6 +17,7 @@ from ui.theme import (
 from ui.coach_panel import CoachPanel
 from ui.capture_preview import CapturePreview
 from ui.settings_panel import SettingsPanel
+from ui.chat_panel import ChatPanel
 from ui.region_selector import RegionSelector
 
 
@@ -42,6 +45,17 @@ class App(ctk.CTk):
         self.coach.on_message(self._on_coach_message)
         self.coach.on_status_change(self._on_status_change)
         self.coach.on_frame_captured(self._on_frame_captured)
+        self.coach.on_overlay_message(self._on_overlay_message)
+
+        # Initialize the chat engine
+        self.chat_engine = ChatEngine()
+        self.chat_engine.set_analyzer(self.coach.analyzer)
+        self.chat_engine.set_screenshot_provider(self._get_current_screenshot)
+        self.chat_engine.on_response(self._on_chat_response)
+        self.chat_engine.on_typing(self._on_chat_typing)
+
+        # Overlay (lazy-loaded)
+        self._overlay = None
 
         # Current view
         self._current_view = "dashboard"
@@ -54,6 +68,10 @@ class App(ctk.CTk):
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Keyboard shortcuts
+        self.bind("<Control-m>", lambda e: self._toggle_voice_mute())
+        self.bind("<Control-o>", lambda e: self._toggle_overlay())
 
     # ── Layout ───────────────────────────────────────────────────────────
 
@@ -77,7 +95,7 @@ class App(ctk.CTk):
         title_label.pack(anchor="w")
 
         subtitle = ctk.CTkLabel(
-            logo_frame, text="Educational Gaming AI",
+            logo_frame, text="Full AI Gaming Companion",
             font=Fonts.small(), text_color=Colors.TEXT_DISABLED,
         )
         subtitle.pack(anchor="w", pady=(2, 0))
@@ -91,6 +109,7 @@ class App(ctk.CTk):
         self._nav_buttons = {}
         nav_items = [
             ("dashboard", "🏠  Dashboard"),
+            ("chat", "💬  Chat"),
             ("settings", "⚙️  Settings"),
         ]
 
@@ -113,7 +132,25 @@ class App(ctk.CTk):
         # Spacer
         ctk.CTkFrame(self._sidebar, fg_color="transparent").pack(fill=ctk.BOTH, expand=True)
 
-        # Coach controls at bottom of sidebar
+        # ── Feature toggles ──────────────────────────────────────────────
+        toggles_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
+        toggles_frame.pack(fill=ctk.X, padx=12, pady=(0, 4))
+
+        # Voice toggle
+        self._voice_btn = create_outline_button(
+            toggles_frame, "🔇 Voice Off",
+            command=self._toggle_voice_mute,
+        )
+        self._voice_btn.pack(fill=ctk.X, pady=2)
+
+        # Overlay toggle
+        self._overlay_btn = create_outline_button(
+            toggles_frame, "🖥️ Overlay Off",
+            command=self._toggle_overlay,
+        )
+        self._overlay_btn.pack(fill=ctk.X, pady=2)
+
+        # ── Coach controls ───────────────────────────────────────────────
         controls_frame = ctk.CTkFrame(self._sidebar, fg_color="transparent")
         controls_frame.pack(fill=ctk.X, padx=12, pady=(0, 8))
 
@@ -156,6 +193,7 @@ class App(ctk.CTk):
         # Create views
         self._views = {}
         self._build_dashboard_view()
+        self._build_chat_view()
         self._build_settings_view()
 
         # Show default view
@@ -169,7 +207,6 @@ class App(ctk.CTk):
         self._views["dashboard"] = view
 
         # Split: left = coach panel, right = preview + info
-        # Use a PanedWindow-like approach with frames
 
         # Right sidebar (preview + stats)
         right_panel = ctk.CTkFrame(view, fg_color="transparent", width=350)
@@ -206,6 +243,12 @@ class App(ctk.CTk):
         )
         self._model_info_label.pack(anchor="w", padx=12, pady=2)
 
+        self._audio_info_label = create_label(
+            info_card, "Audio: Enabled",
+            style="small", text_color=Colors.TEXT_SECONDARY,
+        )
+        self._audio_info_label.pack(anchor="w", padx=12, pady=2)
+
         self._calls_info_label = create_label(
             info_card, "API Calls: 0",
             style="small", text_color=Colors.TEXT_SECONDARY,
@@ -221,11 +264,12 @@ class App(ctk.CTk):
         )
 
         tips = [
-            "• Select the Discord stream area for best results",
-            "• Lower analysis interval = faster feedback",
-            "• Use Real-time mode for fast-paced games",
-            "• Post-Play mode works great for reviewing VODs",
-            "• Add custom instructions for specific coaching focus",
+            "• Select the game window area for best results",
+            "• 🎤 Audio captures game sounds automatically",
+            "• 💬 Chat tab: ask AI questions mid-game",
+            "• 🖥️ Overlay: tips shown over your game",
+            "• 🔊 Voice: AI reads advice aloud",
+            "• Ctrl+M to mute voice, Ctrl+O for overlay",
         ]
         for tip in tips:
             create_label(
@@ -241,6 +285,20 @@ class App(ctk.CTk):
 
         # Wire up the clear callback
         self._coach_panel.on_clear_callback = lambda: self.coach.clear_messages()
+
+    # ── Chat View ────────────────────────────────────────────────────────
+
+    def _build_chat_view(self):
+        """Build the chat companion view."""
+        view = ctk.CTkFrame(self._content, fg_color="transparent")
+        self._views["chat"] = view
+
+        # Chat panel
+        self._chat_panel = ChatPanel(view)
+        self._chat_panel.pack(fill=ctk.BOTH, expand=True, padx=8, pady=8)
+
+        # Wire up send callback
+        self._chat_panel.set_send_callback(self._on_chat_send)
 
     # ── Settings View ────────────────────────────────────────────────────
 
@@ -297,6 +355,9 @@ class App(ctk.CTk):
         if self.coach.is_coaching:
             self.coach.stop_coaching()
             self._coach_btn.configure(text="▶ Start Coaching", fg_color=Colors.ACCENT_GREEN)
+            # Update overlay
+            if self._overlay:
+                self._overlay.update_status(False)
         else:
             if not config.is_api_key_set:
                 self._on_status_change("❌ Set your API key in Settings first!")
@@ -304,6 +365,9 @@ class App(ctk.CTk):
                 return
             self.coach.start_coaching()
             self._coach_btn.configure(text="⏹ Stop Coaching", fg_color=Colors.ACCENT_RED)
+            # Update overlay
+            if self._overlay and self._overlay._visible:
+                self._overlay.update_status(True)
 
     def _select_region(self):
         """Open the region selector overlay."""
@@ -336,6 +400,48 @@ class App(ctk.CTk):
         if frame:
             self._capture_preview.update_preview(frame)
 
+    # ── Voice Control ────────────────────────────────────────────────────
+
+    def _toggle_voice_mute(self):
+        """Toggle voice mute/unmute."""
+        voice = self.coach.voice
+        if voice and voice.is_available:
+            if voice.is_running:
+                voice.is_muted = not voice.is_muted
+                if voice.is_muted:
+                    self._voice_btn.configure(text="🔇 Voice Muted")
+                else:
+                    self._voice_btn.configure(text="🔊 Voice On")
+            else:
+                # Start the voice engine
+                voice.start()
+                config.set("voice_enabled", True)
+                self._voice_btn.configure(text="🔊 Voice On")
+        else:
+            self._on_status_change("⚠️ Voice engine not available (install pyttsx3)")
+
+    # ── Overlay Control ──────────────────────────────────────────────────
+
+    def _toggle_overlay(self):
+        """Toggle the overlay HUD."""
+        if self._overlay is None:
+            try:
+                from ui.overlay import OverlayHUD
+                self._overlay = OverlayHUD(self)
+            except Exception as e:
+                self._on_status_change(f"⚠️ Overlay failed: {str(e)[:40]}")
+                return
+
+        self._overlay.toggle()
+        if self._overlay._visible:
+            self._overlay_btn.configure(text="🖥️ Overlay On")
+            config.set("overlay_enabled", True)
+            if self.coach.is_coaching:
+                self._overlay.update_status(True, self.coach.capture.actual_fps)
+        else:
+            self._overlay_btn.configure(text="🖥️ Overlay Off")
+            config.set("overlay_enabled", False)
+
     # ── Callbacks ────────────────────────────────────────────────────────
 
     def _on_coach_message(self, message: CoachMessage):
@@ -355,10 +461,43 @@ class App(ctk.CTk):
         """Handle a new frame being captured (triggers preview update)."""
         pass  # Preview is updated via the periodic loop
 
+    def _on_overlay_message(self, text: str, priority: str):
+        """Forward a coaching message to the overlay."""
+        if self._overlay and self._overlay._visible:
+            self.after(0, lambda: self._overlay.show_message(text, priority))
+
     def _on_settings_changed(self):
         """Handle settings being saved."""
         self._refresh_session_info()
         self._on_status_change("✅ Settings saved!")
+
+    # ── Chat Callbacks ───────────────────────────────────────────────────
+
+    def _on_chat_send(self, text: str, include_screenshot: bool):
+        """Handle a chat message being sent from the UI."""
+        self.chat_engine.send_message(text, include_screenshot)
+
+    def _on_chat_response(self, message: ChatMessage):
+        """Handle a chat response from the AI."""
+        def _update():
+            if message.role == ChatMessage.ROLE_AI:
+                self._chat_panel.add_ai_message(message.text)
+            elif message.role == ChatMessage.ROLE_SYSTEM:
+                self._chat_panel.add_system_message(message.text)
+        self.after(0, _update)
+
+    def _on_chat_typing(self, is_typing: bool):
+        """Handle the chat typing indicator."""
+        def _update():
+            if is_typing:
+                self._chat_panel.show_typing()
+            else:
+                self._chat_panel.hide_typing()
+        self.after(0, _update)
+
+    def _get_current_screenshot(self) -> bytes:
+        """Get the current screenshot as JPEG bytes for the chat companion."""
+        return self.coach.capture.get_latest_jpeg(resize_for_api=True)
 
     # ── Preview Update Loop ──────────────────────────────────────────────
 
@@ -376,6 +515,10 @@ class App(ctk.CTk):
         if hasattr(self, '_calls_info_label'):
             calls = self.coach.analyzer.total_calls
             self._calls_info_label.configure(text=f"API Calls: {calls}")
+
+        # Update overlay status
+        if self._overlay and self._overlay._visible and self.coach.is_coaching:
+            self._overlay.update_status(True, self.coach.capture.actual_fps)
 
         # Schedule next update (500ms)
         self.after(500, self._update_preview_loop)
@@ -399,10 +542,21 @@ class App(ctk.CTk):
             model = config.get("gemini_model", "gemini-2.5-flash")
             self._model_info_label.configure(text=f"Model: {model}")
 
+        if hasattr(self, '_audio_info_label'):
+            audio_on = config.get("audio_enabled", True)
+            self._audio_info_label.configure(
+                text=f"Audio: {'Enabled' if audio_on else 'Disabled'}"
+            )
+
     # ── Cleanup ──────────────────────────────────────────────────────────
 
     def _on_close(self):
         """Handle window close — stop coaching and clean up."""
         if self.coach.is_coaching:
             self.coach.stop_coaching()
+        if self._overlay:
+            try:
+                self._overlay.destroy()
+            except Exception:
+                pass
         self.destroy()

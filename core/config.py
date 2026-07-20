@@ -28,6 +28,22 @@ DEFAULT_CONFIG = {
     "custom_instructions": "",        # User's custom coaching focus
     "auto_scroll": True,
     "sound_alerts": False,
+    # ── v2: Audio capture ───────────────────────────────────────────
+    "audio_enabled": True,            # Enable system audio capture
+    "audio_buffer_duration": 5.0,     # Seconds of audio to buffer
+    "audio_sample_rate": 16000,       # Sample rate in Hz
+    # ── v2: Voice commentary ────────────────────────────────────────
+    "voice_enabled": False,           # Enable voice commentary
+    "voice_engine": "pyttsx3",        # Voice engine backend
+    "voice_speed": 1.2,               # Speech speed multiplier
+    "voice_volume": 0.8,              # Voice volume (0.0–1.0)
+    # ── v2: Overlay HUD ─────────────────────────────────────────────
+    "overlay_enabled": False,         # Enable overlay HUD
+    "overlay_position": "bottom",     # top, bottom, top_right, bottom_right
+    "overlay_opacity": 0.85,          # Overlay background opacity
+    "overlay_width": 400,             # Overlay width in pixels
+    # ── v2: Plugin system ────────────────────────────────────────────
+    "active_plugin": "generic",       # Active game plugin name
 }
 
 CONFIG_FILE = _PROJECT_ROOT / "config.json"
