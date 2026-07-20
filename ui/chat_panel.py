@@ -7,7 +7,7 @@ import time
 import customtkinter as ctk
 from typing import Optional, Callable
 
-from ui.theme import Colors, Fonts, create_card_frame, create_label
+from ui.theme import Colors, Fonts, create_card_frame, create_label, blend_colors
 
 
 class ChatPanel(ctk.CTkFrame):
@@ -77,7 +77,7 @@ class ChatPanel(ctk.CTkFrame):
         # Screenshot toggle
         self._screenshot_toggle = ctk.CTkButton(
             input_frame, text="📸", width=36, height=36,
-            fg_color=Colors.ACCENT_BLUE + "33",
+            fg_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_MEDIUM, 0.2),
             hover_color=Colors.BG_HOVER,
             text_color=Colors.ACCENT_BLUE,
             font=(Fonts.FAMILY, 16),
@@ -196,10 +196,10 @@ class ChatPanel(ctk.CTkFrame):
             # User bubble — right-aligned, accent color
             bubble = ctk.CTkFrame(
                 container,
-                fg_color=Colors.ACCENT_BLUE + "22",
+                fg_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_DARK, 0.13),
                 corner_radius=12,
                 border_width=1,
-                border_color=Colors.ACCENT_BLUE + "44",
+                border_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_DARK, 0.26),
             )
             bubble.pack(anchor="e", padx=(60, 8))
 
@@ -277,7 +277,7 @@ class ChatPanel(ctk.CTkFrame):
 
         bubble = ctk.CTkFrame(
             container,
-            fg_color=Colors.BG_LIGHT + "88",
+            fg_color=blend_colors(Colors.BG_LIGHT, Colors.BG_DARK, 0.53),
             corner_radius=10,
         )
         bubble.pack(padx=20)
@@ -316,7 +316,7 @@ class ChatPanel(ctk.CTkFrame):
         self._include_screenshot = not self._include_screenshot
         if self._include_screenshot:
             self._screenshot_toggle.configure(
-                fg_color=Colors.ACCENT_BLUE + "33",
+                fg_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_MEDIUM, 0.2),
                 text_color=Colors.ACCENT_BLUE,
             )
         else:

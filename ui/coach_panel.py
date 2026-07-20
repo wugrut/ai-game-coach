@@ -7,7 +7,7 @@ import time
 import customtkinter as ctk
 from typing import List
 
-from ui.theme import Colors, Fonts, create_card_frame, create_label
+from ui.theme import Colors, Fonts, create_card_frame, create_label, blend_colors
 
 
 class CoachPanel(ctk.CTkFrame):
@@ -97,7 +97,7 @@ class CoachPanel(ctk.CTkFrame):
             fg_color=Colors.BG_MEDIUM,
             corner_radius=10,
             border_width=1,
-            border_color=style["border"] + "44",  # Semi-transparent border
+            border_color=blend_colors(style["border"], Colors.BG_DARK, 0.25),
         )
         msg_card.pack(fill=ctk.X, padx=4, pady=3)
 
@@ -162,7 +162,7 @@ class CoachPanel(ctk.CTkFrame):
             fg_color=Colors.BG_MEDIUM,
             corner_radius=10,
             border_width=1,
-            border_color=Colors.ACCENT_BLUE + "33",
+            border_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_DARK, 0.2),
         )
         welcome_card.pack(fill=ctk.X, padx=4, pady=3)
 

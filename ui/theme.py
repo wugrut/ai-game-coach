@@ -33,7 +33,7 @@ class Colors:
 
     # Borders
     BORDER_SUBTLE = "#2a2a45"    # Subtle borders
-    BORDER_ACCENT = "#00d4ff33"  # Accent borders (with alpha)
+    BORDER_ACCENT = "#09354d"    # Blended accent border (ACCENT_BLUE over BG_DARK with 0.2 opacity)
 
     # Priority message colors
     PRIORITY_CRITICAL = "#ff4466"
@@ -176,4 +176,26 @@ def _lighten(hex_color: str, factor: float = 0.2) -> str:
     r = min(255, int(r + (255 - r) * factor))
     g = min(255, int(g + (255 - g) * factor))
     b = min(255, int(b + (255 - b) * factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def blend_colors(fg_hex: str, bg_hex: str, alpha: float) -> str:
+    """Blend a foreground color with a background color by an alpha factor (0.0 to 1.0) to emulate transparency."""
+    fg_hex = fg_hex.lstrip("#")
+    bg_hex = bg_hex.lstrip("#")
+    
+    # Parse RGB
+    fg_r, fg_g, fg_b = int(fg_hex[0:2], 16), int(fg_hex[2:4], 16), int(fg_hex[4:6], 16)
+    bg_r, bg_g, bg_b = int(bg_hex[0:2], 16), int(bg_hex[2:4], 16), int(bg_hex[4:6], 16)
+    
+    # Blend
+    r = int(fg_r * alpha + bg_r * (1 - alpha))
+    g = int(fg_g * alpha + bg_g * (1 - alpha))
+    b = int(fg_b * alpha + bg_b * (1 - alpha))
+    
+    # Clip
+    r = max(0, min(255, r))
+    g = max(0, min(255, g))
+    b = max(0, min(255, b))
+    
     return f"#{r:02x}{g:02x}{b:02x}"

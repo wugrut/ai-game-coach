@@ -12,7 +12,7 @@ from typing import Optional
 import customtkinter as ctk
 
 from core.config import config
-from ui.theme import Colors, Fonts
+from ui.theme import Colors, Fonts, blend_colors
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +89,10 @@ class OverlayHUD(ctk.CTkToplevel):
         # Main container with semi-transparent background
         self._container = ctk.CTkFrame(
             self,
-            fg_color=Colors.BG_DARKEST + "dd",
+            fg_color=Colors.BG_DARKEST,
             corner_radius=16,
             border_width=1,
-            border_color=Colors.ACCENT_BLUE + "44",
+            border_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_DARKEST, 0.26),
         )
         self._container.pack(fill=ctk.BOTH, expand=True, padx=8, pady=8)
 
@@ -167,7 +167,7 @@ class OverlayHUD(ctk.CTkToplevel):
                 text=f"{style['emoji']} {priority.upper()}",
                 text_color=style["color"],
             )
-            self._container.configure(border_color=style["border"] + "66")
+            self._container.configure(border_color=blend_colors(style["border"], Colors.BG_DARKEST, 0.4))
             self._message_time = time.time()
             self._current_message = text
 
@@ -274,7 +274,7 @@ class OverlayHUD(ctk.CTkToplevel):
                         text="Listening...",
                     )
                     self._priority_label.configure(text="")
-                    self._container.configure(border_color=Colors.ACCENT_BLUE + "22")
+                    self._container.configure(border_color=blend_colors(Colors.ACCENT_BLUE, Colors.BG_DARKEST, 0.13))
                     self._current_message = ""
                 except Exception:
                     pass
